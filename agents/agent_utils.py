@@ -156,3 +156,66 @@ def get_next_label_from_plan(
             logger.info(f"Workflow plan: {current_label} → {next_label}")
             return next_label
     return fallback
+
+
+# ---------------------------------------------------------------------------
+# Comment classification (human vs agent)
+# ---------------------------------------------------------------------------
+
+# Every agent comment ends with a signature footer: "_由 **XXX Agent** 寫入 · timestamp_"
+# Human comments have no such footer. The Linear user field can't distinguish them
+# because all comments are posted via the same API token.
+_AGENT_FOOTER_RE = re.compile(r"_由\s*\*\*[^*]+\*\*\s*寫入")
+
+
+def is_agent_comment(body: str) -> bool:
+    """True if the comment was written by a Hermes Nexus agent (has the signature footer)."""
+    return bool(_AGENT_FOOTER_RE.search(body or ""))
+
+
+def split_comments(comments: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split comments into (human_comments, agent_comments) by footer signature."""
+    human, agent = [], []
+    for c in comments:
+        (agent if is_agent_comment(c.get("body", "")) else human).append(c)
+    return human, agent
+
+
+# ---------------------------------------------------------------------------
+# Task run facts (ground truth — what each agent actually did)
+# ---------------------------------------------------------------------------
+
+def read_task_run_facts(identifier: str, exclude_agents: tuple = ("hermes_master",)) -> list[dict]:
+    """Read the latest execution result per agent from task_runs/.
+
+    Returns the actual recorded outcomes (status + key details) so that
+    Hermes Master can reason from facts rather than inferring from comments.
+    Dirs are timestamped, so later runs overwrite earlier ones per agent.
+    """
+    task_runs = Path("task_runs")
+    if not task_runs.exists():
+        return []
+
+    needle = f"{identifier}_"
+    dirs = sorted(
+        [d for d in task_runs.iterdir() if d.is_dir() and needle in d.name],
+        key=lambda d: d.name,  # ascending: later timestamp wins
+    )
+
+    latest_by_agent: dict[str, dict] = {}
+    for d in dirs:
+        for result_json in d.glob("*_result.json"):
+            try:
+                data = json.loads(result_json.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            agent = data.get("agent", "unknown")
+            if agent in exclude_agents:
+                continue
+            latest_by_agent[agent] = {
+                "agent": agent,
+                "status": data.get("status"),
+                "run_dir": d.name,
+                "details": {k: v for k, v in data.items() if k not in ("agent", "status")},
+            }
+    return list(latest_by_agent.values())

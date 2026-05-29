@@ -20,7 +20,7 @@ load_dotenv()
 
 import anthropic
 
-from agents.agent_utils import acquire_lock, fetch_pending_issues, set_in_progress, set_todo, read_workflow_plan, get_next_label_from_plan
+from agents.agent_utils import acquire_lock, fetch_pending_issues, set_in_progress, set_todo, read_workflow_plan, get_next_label_from_plan, split_comments, read_task_run_facts
 from core.config import get_settings
 from linear.client import LinearClient
 
@@ -159,7 +159,11 @@ def call_claude(system_prompt: str, user_prompt: str, tool: dict, config) -> dic
 RESPOND_SYSTEM_PROMPT = (
     "你是 Hermes Nexus 的 Hermes Master。使用者在 Linear issue 上提出了一個問題或請求說明。"
     "請直接、完整地回答使用者的問題（繁體中文，Markdown 格式）。"
-    "充分運用你對這個系統的了解，回答要具體有深度。直接給出答案，不要說「我將派工」之類的話。"
+    "充分運用你對這個系統的了解，回答要具體有深度。直接給出答案，不要說「我將派工」之類的話。\n\n"
+    "【事實依據原則】關於「系統實際做了什麼、產出什麼檔案、哪個步驟成功或失敗」，"
+    "只能依據 prompt 中提供的『實際執行紀錄（task_runs）』。"
+    "絕對不要從 agent 留言推測，也不要編造紀錄中沒有的檔案、工具或事件。"
+    "若紀錄中沒有某項資訊，就明說沒有，不要臆測。"
 )
 
 
@@ -186,23 +190,48 @@ def call_claude_text(user_prompt: str, config) -> str:
 
 def build_issue_prompt(issue: dict) -> str:
     comments = (issue.get("comments") or {}).get("nodes", [])
-    comments_text = "\n\n".join(
-        f"**{c.get('user', {}).get('name', 'unknown')}** ({c.get('createdAt', '')}):\n{c.get('body', '')}"
-        for c in comments
-    ) or "(無留言)"
+    human_comments, agent_comments = split_comments(comments)
     labels = [l["name"] for l in (issue.get("labels") or {}).get("nodes", [])]
     state = (issue.get("state") or {}).get("name", "unknown")
+    identifier = issue.get("identifier", "")
+
+    # Human comments — these are the real user requests/questions, the highest priority signal
+    human_text = "\n\n".join(
+        f"({c.get('createdAt', '')}):\n{c.get('body', '')}"
+        for c in human_comments
+    ) or "(無真人留言)"
+
+    # Agent comments — only keep the first line (heading) as context; the full bodies
+    # are unreliable narratives and should NOT be treated as fact.
+    agent_summary = "\n".join(
+        f"- {c.get('body', '').splitlines()[0] if c.get('body') else ''} ({c.get('createdAt', '')})"
+        for c in agent_comments
+    ) or "(無 agent 留言)"
+
+    # Ground truth — what each worker agent actually recorded in task_runs/
+    facts = read_task_run_facts(identifier)
+    if facts:
+        facts_lines = []
+        for f in facts:
+            detail = ", ".join(f"{k}={v}" for k, v in f["details"].items()
+                               if k in ("filename", "saved_path", "pptx_path", "branch", "next_label", "summary"))
+            facts_lines.append(f"- **{f['agent']}**: status={f['status']}  {detail}")
+        facts_text = "\n".join(facts_lines)
+    else:
+        facts_text = "(尚無任何 agent 的實際執行紀錄)"
 
     return (
         f"## Issue\n\n"
-        f"- **Identifier**: {issue.get('identifier')}\n"
+        f"- **Identifier**: {identifier}\n"
         f"- **Title**: {issue.get('title')}\n"
         f"- **Labels**: {', '.join(labels)}\n"
         f"- **State**: {state}\n"
         f"- **Priority**: {issue.get('priority')}\n"
         f"- **URL**: {issue.get('url')}\n\n"
         f"## Description\n\n{issue.get('description') or '(無描述)'}\n\n"
-        f"## 留言記錄（時間排序）\n\n{comments_text}"
+        f"## 真人留言（最高優先，這是使用者真正的請求或問題）\n\n{human_text}\n\n"
+        f"## 實際執行紀錄（ground truth，來自 task_runs，以此為事實依據）\n\n{facts_text}\n\n"
+        f"## Agent 留言標題（僅供參考，內容可能不準確，不可當作事實）\n\n{agent_summary}"
     )
 
 
