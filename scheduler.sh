@@ -54,6 +54,7 @@ status_all() {
         done
     fi
     [ $found -eq 0 ] && echo "  No agents running."
+    return 0
 }
 
 case "${1:-start}" in

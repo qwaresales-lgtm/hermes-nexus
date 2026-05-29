@@ -101,8 +101,7 @@ async def _generate_notebooklm(
     Returns the saved PPTX path.
     """
     try:
-        from notebooklm import NotebookLMClient
-        from notebooklm.models import SlideDeckFormat, SlideDeckLength
+        from notebooklm import NotebookLMClient, SlideDeckFormat, SlideDeckLength
     except ImportError:
         raise RuntimeError(
             "notebooklm-py is not installed. Run: pip install 'notebooklm-py[browser]' "
