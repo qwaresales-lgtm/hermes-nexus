@@ -19,3 +19,8 @@
 4. 環境問題、權限問題、系統錯誤 → human-failed
 5. **同一張 issue 若已有兩次以上 Hermes Master 留言 → human-failed（避免無限循環）**
 6. 升級原因不明 → human-failed（寧可讓人工確認）
+
+## 重試出口
+
+issue 進入 `human-failed` 後，人工確認並修正問題，可以將 label 改為 `human-retry + Todo`。
+Hermes Master 收到 `human-retry` 會重新規劃，不受「兩次升級」的限制。

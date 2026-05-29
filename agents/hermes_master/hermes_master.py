@@ -231,7 +231,7 @@ def comment_error(error: Exception) -> str:
 
 def process_issue(issue: dict, client: LinearClient, config, mode: str) -> None:
     """
-    mode: "dispatch" for agent-ready, "escalate" for agent-escalate
+    mode: "dispatch" for agent-ready / human-retry, "escalate" for agent-escalate
     """
     identifier = issue["identifier"]
     issue_id = issue["id"]
@@ -310,7 +310,7 @@ def _run_one_poll_cycle(linear_client: LinearClient, config, args) -> None:
     dispatched = 0
     escalated = 0
 
-    # --- agent-ready: initial dispatch ---
+    # --- agent-ready + human-retry: dispatch / re-dispatch ---
     if not args.escalate_only:
         if args.issue_id:
             ready_issues = [linear_client.get_issue(args.issue_id)]
@@ -321,14 +321,16 @@ def _run_one_poll_cycle(linear_client: LinearClient, config, args) -> None:
                 logger.info(f"Issue {args.identifier} not found in '{config.linear_ready_label}'")
         else:
             ready_issues = fetch_pending_issues(linear_client, config.linear_ready_label, config)
+            retry_issues = fetch_pending_issues(linear_client, config.flow_label_human_retry, config)
+            ready_issues = ready_issues + retry_issues
 
         if ready_issues:
-            logger.info(f"agent-ready: {len(ready_issues)} issue(s) — {[i['identifier'] for i in ready_issues]}")
+            logger.info(f"dispatch: {len(ready_issues)} issue(s) — {[i['identifier'] for i in ready_issues]}")
             for issue in ready_issues:
                 process_issue(issue, linear_client, config, mode="dispatch")
             dispatched = len(ready_issues)
         else:
-            logger.info("agent-ready: nothing to dispatch.")
+            logger.info("dispatch: nothing to do.")
 
     # --- agent-escalate: re-routing ---
     if not args.ready_only:

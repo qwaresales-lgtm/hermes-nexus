@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     flow_label_human_confirm: str = "human-confirm"
     flow_label_human_clarify: str = "human-clarify"
     flow_label_human_failed: str = "human-failed"
+    flow_label_human_retry: str = "human-retry"
     development_next_label: str = "agent-review"
 
     class Config:

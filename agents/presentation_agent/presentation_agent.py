@@ -136,8 +136,8 @@ async def _generate_notebooklm(
         logger.info(f"Generating slide deck (format={config.notebooklm_format}, length={config.notebooklm_length})...")
         status = await client.artifacts.generate_slide_deck(
             nb.id,
-            slide_deck_format=slide_format,
-            slide_deck_length=slide_length,
+            slide_format=slide_format,
+            slide_length=slide_length,
         )
         logger.info(f"Generation started: task_id={status.task_id}")
 
