@@ -21,6 +21,14 @@ install:
 	python3 -m venv venv
 	venv/bin/pip install -r requirements.txt
 
+install-notebooklm:
+	venv/bin/pip install "notebooklm-py[browser]"
+	venv/bin/playwright install chromium
+	@echo "Done. Run: make notebooklm-login"
+
+notebooklm-login:
+	venv/bin/notebooklm login --browser-cookies chrome
+
 api:
 	$(PYTHON) -m uvicorn main:app --reload
 
