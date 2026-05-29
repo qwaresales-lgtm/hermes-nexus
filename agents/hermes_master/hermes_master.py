@@ -156,6 +156,30 @@ def call_claude(system_prompt: str, user_prompt: str, tool: dict, config) -> dic
     raise ValueError("Claude did not call the expected tool — unexpected response format")
 
 
+RESPOND_SYSTEM_PROMPT = (
+    "你是 Hermes Nexus 的 Hermes Master。使用者在 Linear issue 上提出了一個問題或請求說明。"
+    "請直接、完整地回答使用者的問題（繁體中文，Markdown 格式）。"
+    "充分運用你對這個系統的了解，回答要具體有深度。直接給出答案，不要說「我將派工」之類的話。"
+)
+
+
+def call_claude_text(user_prompt: str, config) -> str:
+    """Generate a plain-text answer (no tools) — used for the respond action.
+    This is bulletproof: there is no tool field to forget."""
+    client = anthropic.Anthropic(api_key=config.anthropic_api_key)
+    response = client.messages.create(
+        model=config.hermes_master_model,
+        max_tokens=4096,
+        system=RESPOND_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    parts = [b.text for b in response.content if b.type == "text"]
+    text = "\n".join(parts).strip()
+    if not text:
+        raise ValueError("Claude returned empty text for respond action")
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Prompt builder
 # ---------------------------------------------------------------------------
@@ -300,11 +324,13 @@ def process_issue(issue: dict, client: LinearClient, config, mode: str) -> None:
             logger.info(f"[{identifier}] Action: {action} — {decision.get('summary', '')}")
 
             if action == "respond":
-                if not decision.get("direct_response"):
-                    raise ValueError(
-                        "Claude returned action=respond but omitted direct_response. "
-                        "Check dispatch_prompt.md to ensure direct_response is required for respond action."
-                    )
+                # Generate the answer via a dedicated plain-text call (no tool field to forget).
+                # Prefer the direct_response the model already provided; otherwise ask again as text.
+                answer = decision.get("direct_response")
+                if not answer:
+                    logger.info(f"[{identifier}] No direct_response in tool call, generating via text call...")
+                    answer = call_claude_text(user_prompt, config)
+                decision["direct_response"] = answer
                 client.add_comment(issue_id, comment_responded(decision))
                 next_label = config.flow_label_human_confirm
                 client.replace_flow_label(issue_id, next_label, config.linear_team_id)
