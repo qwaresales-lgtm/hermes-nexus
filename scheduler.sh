@@ -37,20 +37,22 @@ stop_all() {
 
 status_all() {
     local found=0
-    for pid_file in "$PIDS_DIR"/*.pid 2>/dev/null; do
-        [ -f "$pid_file" ] || continue
-        found=1
-        local name
-        name=$(basename "$pid_file" .pid)
-        local pid
-        pid=$(cat "$pid_file")
-        if kill -0 "$pid" 2>/dev/null; then
-            echo "  ● $name  running  (PID $pid)"
-        else
-            echo "  ✗ $name  dead     (PID $pid)"
-            rm -f "$pid_file"
-        fi
-    done
+    if [ -d "$PIDS_DIR" ]; then
+        for pid_file in "$PIDS_DIR"/*.pid; do
+            [ -f "$pid_file" ] || continue
+            found=1
+            local name
+            name=$(basename "$pid_file" .pid)
+            local pid
+            pid=$(cat "$pid_file")
+            if kill -0 "$pid" 2>/dev/null; then
+                echo "  ● $name  running  (PID $pid)"
+            else
+                echo "  ✗ $name  dead     (PID $pid)"
+                rm -f "$pid_file"
+            fi
+        done
+    fi
     [ $found -eq 0 ] && echo "  No agents running."
 }
 
