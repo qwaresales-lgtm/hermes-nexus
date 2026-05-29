@@ -300,8 +300,11 @@ def process_issue(issue: dict, client: LinearClient, config, mode: str) -> None:
             logger.info(f"[{identifier}] Action: {action} — {decision.get('summary', '')}")
 
             if action == "respond":
-                response_text = decision.get("direct_response") or decision.get("summary") or "(回覆內容缺失)"
-                decision["direct_response"] = response_text
+                if not decision.get("direct_response"):
+                    raise ValueError(
+                        "Claude returned action=respond but omitted direct_response. "
+                        "Check dispatch_prompt.md to ensure direct_response is required for respond action."
+                    )
                 client.add_comment(issue_id, comment_responded(decision))
                 next_label = config.flow_label_human_confirm
                 client.replace_flow_label(issue_id, next_label, config.linear_team_id)

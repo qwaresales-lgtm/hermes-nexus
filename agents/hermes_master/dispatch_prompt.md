@@ -12,10 +12,13 @@
 - 例：「這個系統是做什麼的？」、「請解釋 prompt 的運作方式」、「agent-dev 跟 agent-doc 有什麼差別？」
 
 **行為：**
-- 直接在 `direct_response` 撰寫完整回答（Markdown 格式）
-- 回答要具體、有深度，充分運用你對這個系統的了解
+- **必填 `direct_response` 欄位**，內容是給使用者看的完整回答（Markdown 格式）
+- `direct_response` 是「回覆給使用者的內容」，`summary` 只是給系統記錄的決策摘要，兩者用途完全不同，不可混用
+- 回答要具體、有深度，充分運用你對這個系統的了解，直接解答使用者的問題
 - 不派工給任何 Agent
 - 設成 `human-confirm`（讓人工確認回覆內容即可）
+
+> ⚠️ 選擇 `respond` 卻沒有填寫 `direct_response` 會導致系統錯誤。回答內容務必寫在 `direct_response`，不是 `summary`。
 
 ### 2. dispatch（派工執行）
 
