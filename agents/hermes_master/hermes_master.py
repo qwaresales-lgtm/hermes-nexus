@@ -300,13 +300,16 @@ def process_issue(issue: dict, client: LinearClient, config, mode: str) -> None:
             logger.info(f"[{identifier}] Action: {action} — {decision.get('summary', '')}")
 
             if action == "respond":
-                # Answer the question directly, remove flow label (set to human-confirm so human sees it)
+                response_text = decision.get("direct_response") or decision.get("summary") or "(回覆內容缺失)"
+                decision["direct_response"] = response_text
                 client.add_comment(issue_id, comment_responded(decision))
                 next_label = config.flow_label_human_confirm
                 client.replace_flow_label(issue_id, next_label, config.linear_team_id)
                 logger.info(f"[{identifier}] Responded directly → {next_label}")
 
             elif action == "clarify":
+                if not decision.get("clarification_question"):
+                    decision["clarification_question"] = decision.get("summary", "請補充更多資訊")
                 client.add_comment(issue_id, comment_clarified(decision))
                 next_label = config.flow_label_human_clarify
                 client.replace_flow_label(issue_id, next_label, config.linear_team_id)
