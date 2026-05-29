@@ -41,10 +41,13 @@ class Settings(BaseSettings):
     document_model: str = "claude-sonnet-4-6"
     document_next_label: str = "human-confirm"
 
-    # Presentation Agent
+    # Presentation Agent (NotebookLM)
     flow_label_ppt: str = "agent-ppt"
-    presentation_model: str = "claude-sonnet-4-6"
     presentation_next_label: str = "human-confirm"
+    notebooklm_timeout: int = 1200       # seconds to wait for slide generation (300-600s typical)
+    notebooklm_format: str = "DETAILED_DECK"   # DETAILED_DECK | PRESENTER_SLIDES
+    notebooklm_length: str = "DEFAULT"          # DEFAULT | SHORT
+    notebooklm_delete_notebook: bool = False    # keep notebook in NotebookLM after download
 
     # Reviewer Agent
     reviewer_model: str = "claude-sonnet-4-6"

@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """
 Hermes Nexus — Presentation Agent
-Monitors agent-ppt issues and generates Marp Markdown presentations using Claude API.
+Monitors agent-ppt issues and generates PPTX presentations via Google NotebookLM.
+Source material: Document Agent output for the same issue (fallback: issue description).
+
+Setup (one-time):
+    pip install "notebooklm-py[browser]"
+    playwright install chromium
+    notebooklm login
 """
 
 import argparse
+import asyncio
 import json
 import logging
 import sys
@@ -17,8 +24,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 
 load_dotenv()
-
-import anthropic
 
 from agents.agent_utils import (
     acquire_lock,
@@ -33,46 +38,6 @@ from core.config import get_settings
 from linear.client import LinearClient
 
 logger = logging.getLogger(__name__)
-
-_PROMPT_DIR = Path(__file__).parent
-
-
-def _load_prompt(filename: str) -> str:
-    path = _PROMPT_DIR / filename
-    if not path.exists():
-        logger.warning(f"Prompt file not found: {path}")
-        return ""
-    return path.read_text(encoding="utf-8")
-
-
-SYSTEM_PROMPT = _load_prompt("system_prompt.md")
-
-PRESENTATION_TOOL = {
-    "name": "create_presentation",
-    "description": "產生完整的 Marp Markdown 簡報並指定儲存路徑",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "filename": {
-                "type": "string",
-                "description": "相對於 PROJECT_PATH 的儲存路徑，副檔名 .md，例如 product_intro.md",
-            },
-            "content": {
-                "type": "string",
-                "description": "完整的 Marp Markdown 簡報內容（含 frontmatter）",
-            },
-            "slide_count": {
-                "type": "integer",
-                "description": "投影片總張數",
-            },
-            "summary": {
-                "type": "string",
-                "description": "簡報摘要（1-3 句），用於 Linear 留言",
-            },
-        },
-        "required": ["filename", "content", "slide_count", "summary"],
-    },
-}
 
 
 # ---------------------------------------------------------------------------
@@ -95,41 +60,116 @@ def setup_logging() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Claude API
+# Find Document Agent output for the same issue
 # ---------------------------------------------------------------------------
 
-def call_claude(user_prompt: str, config) -> dict:
-    client = anthropic.Anthropic(api_key=config.anthropic_api_key)
-    response = client.messages.create(
-        model=config.presentation_model,
-        max_tokens=8000,
-        system=SYSTEM_PROMPT,
-        tools=[PRESENTATION_TOOL],
-        tool_choice={"type": "any"},
-        messages=[{"role": "user", "content": user_prompt}],
+def find_doc_output(identifier: str) -> dict | None:
+    """Find the latest successful Document Agent output for this issue identifier."""
+    task_runs = Path("task_runs")
+    if not task_runs.exists():
+        return None
+
+    candidates = sorted(
+        [d for d in task_runs.iterdir() if d.is_dir() and d.name.startswith(f"doc_{identifier}_")],
+        reverse=True,
     )
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "create_presentation":
-            return block.input
-    raise ValueError("Claude did not call create_presentation tool")
+    for candidate in candidates:
+        result_json = candidate / "doc_result.json"
+        if not result_json.exists():
+            continue
+        try:
+            data = json.loads(result_json.read_text(encoding="utf-8"))
+            if data.get("status") == "completed" and data.get("saved_path"):
+                return data
+        except Exception:
+            continue
+    return None
 
 
 # ---------------------------------------------------------------------------
-# Prompt builder
+# NotebookLM workflow (async)
 # ---------------------------------------------------------------------------
 
-def build_user_prompt(issue: dict) -> str:
-    comments = (issue.get("comments") or {}).get("nodes", [])
-    comments_text = "\n\n".join(
-        f"**{c.get('user', {}).get('name', 'unknown')}** ({c.get('createdAt', '')}):\n{c.get('body', '')}"
-        for c in comments
-    ) or "(無留言)"
-    return (
-        f"## 任務\n\n"
-        f"- **Issue**: {issue.get('identifier')} — {issue.get('title')}\n"
-        f"- **URL**: {issue.get('url')}\n\n"
-        f"## 需求描述\n\n{issue.get('description') or '(無描述)'}\n\n"
-        f"## 留言記錄\n\n{comments_text}"
+async def _generate_notebooklm(
+    notebook_title: str,
+    source_title: str,
+    source_content: str,
+    output_path: Path,
+    config,
+) -> str:
+    """Create a NotebookLM notebook, add source, generate and download PPTX.
+    Returns the saved PPTX path.
+    """
+    try:
+        from notebooklm import NotebookLMClient
+        from notebooklm.models import SlideDeckFormat, SlideDeckLength
+    except ImportError:
+        raise RuntimeError(
+            "notebooklm-py is not installed. Run: pip install 'notebooklm-py[browser]' "
+            "&& playwright install chromium && notebooklm login"
+        )
+
+    fmt_map = {
+        "DETAILED_DECK": SlideDeckFormat.DETAILED_DECK,
+        "PRESENTER_SLIDES": SlideDeckFormat.PRESENTER_SLIDES,
+    }
+    len_map = {
+        "DEFAULT": SlideDeckLength.DEFAULT,
+        "SHORT": SlideDeckLength.SHORT,
+    }
+    slide_format = fmt_map.get(config.notebooklm_format, SlideDeckFormat.DETAILED_DECK)
+    slide_length = len_map.get(config.notebooklm_length, SlideDeckLength.DEFAULT)
+
+    async with await NotebookLMClient.from_storage() as client:
+        logger.info(f"Creating NotebookLM notebook: '{notebook_title}'")
+        nb = await client.notebooks.create(notebook_title)
+        logger.info(f"Notebook created: {nb.id}")
+
+        logger.info(f"Adding source: '{source_title}' ({len(source_content)} chars)")
+        await client.sources.add_text(
+            nb.id,
+            title=source_title,
+            content=source_content,
+            wait=True,
+        )
+        logger.info("Source added and ready")
+
+        logger.info(f"Generating slide deck (format={config.notebooklm_format}, length={config.notebooklm_length})...")
+        status = await client.artifacts.generate_slide_deck(
+            nb.id,
+            slide_deck_format=slide_format,
+            slide_deck_length=slide_length,
+        )
+        logger.info(f"Generation started: task_id={status.task_id}")
+
+        logger.info(f"Waiting for completion (timeout={config.notebooklm_timeout}s)...")
+        await client.artifacts.wait_for_completion(
+            nb.id,
+            status.task_id,
+            timeout=config.notebooklm_timeout,
+        )
+        logger.info("Slide deck generation complete")
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        pptx_path = await client.artifacts.download_slide_deck(
+            nb.id,
+            str(output_path),
+            output_format="pptx",
+        )
+        logger.info(f"Downloaded PPTX: {pptx_path}")
+
+        if config.notebooklm_delete_notebook:
+            await client.notebooks.delete(nb.id)
+            logger.info(f"Notebook {nb.id} deleted")
+        else:
+            logger.info(f"Notebook {nb.id} kept in NotebookLM")
+
+        return pptx_path
+
+
+def generate_notebooklm(notebook_title, source_title, source_content, output_path, config) -> str:
+    return asyncio.run(
+        _generate_notebooklm(notebook_title, source_title, source_content, output_path, config)
     )
 
 
@@ -145,29 +185,35 @@ def _footer() -> str:
     return f"\n\n---\n_由 **Presentation Agent** 寫入 · {_ts()}_"
 
 
-def comment_success(result: dict, saved_path: str, next_label: str) -> str:
+def comment_success(identifier: str, pptx_path: str, source_desc: str, next_label: str,
+                    keep_notebook: bool) -> str:
+    notebook_note = (
+        "NotebookLM notebook 已保留，可至 https://notebooklm.google.com/ 查看。"
+        if keep_notebook
+        else "NotebookLM notebook 已自動刪除。"
+    )
     return (
         f"# Presentation Agent：簡報產生完成\n\n"
-        f"## 簡報摘要\n\n{result['summary']}\n\n"
-        f"## 產出資訊\n\n"
-        f"- 檔案：`{saved_path}`\n"
-        f"- 投影片：{result['slide_count']} 張\n\n"
-        f"## 轉換方式\n\n"
-        f"```bash\n"
-        f"# 轉為 PDF\n"
-        f"npx @marp-team/marp-cli {result['filename']} --pdf\n\n"
-        f"# 轉為 PPTX\n"
-        f"npx @marp-team/marp-cli {result['filename']} --pptx\n"
-        f"```\n\n"
+        f"## 來源\n\n{source_desc}\n\n"
+        f"## 產出檔案\n\n`{pptx_path}`\n\n"
+        f"## 備註\n\n{notebook_note}\n\n"
         f"## 下一步\n任務已轉移至 `{next_label}`。"
         f"{_footer()}"
     )
 
 
 def comment_error(error: Exception) -> str:
+    msg = str(error)
+    hint = ""
+    if "from_storage" in msg or "login" in msg.lower() or "auth" in msg.lower():
+        hint = (
+            "\n\n**可能原因：NotebookLM 尚未登入。**請在伺服器執行：\n"
+            "```bash\nnotebooklm login\n```"
+        )
     return (
         f"# Presentation Agent：執行失敗，已升級給 Hermes Master\n\n"
-        f"## 錯誤摘要\n\n```\n{str(error)[:500]}\n```\n\n"
+        f"## 錯誤摘要\n\n```\n{msg[:500]}\n```"
+        f"{hint}\n\n"
         f"## 系統處理\n任務已改為 `agent-escalate`。"
         f"{_footer()}"
     )
@@ -206,39 +252,60 @@ def process_issue(issue: dict, client: LinearClient, config) -> None:
         if path_override:
             logger.info(f"[{identifier}] PROJECT_PATH override: {project_path}")
 
-        # Fetch fresh issue with comments
-        fresh_issue = client.get_issue(issue_id)
-        user_prompt = build_user_prompt(fresh_issue)
-        (run_dir / "ppt_prompt.md").write_text(user_prompt, encoding="utf-8")
+        # Find Document Agent output for same issue
+        doc_output = find_doc_output(identifier)
+        if doc_output:
+            doc_path = Path(doc_output["saved_path"])
+            if doc_path.exists():
+                source_content = doc_path.read_text(encoding="utf-8")
+                source_title = doc_path.name
+                source_desc = f"Document Agent 產出：`{doc_output['saved_path']}`"
+                logger.info(f"[{identifier}] Using doc output: {doc_path} ({len(source_content)} chars)")
+            else:
+                logger.warning(f"[{identifier}] Doc output path not found: {doc_path}, falling back to issue description")
+                doc_output = None
 
-        logger.info(f"[{identifier}] Calling {config.presentation_model} to generate presentation...")
-        result = call_claude(user_prompt, config)
-        logger.info(f"[{identifier}] Presentation generated: {result['filename']} ({result['slide_count']} slides)")
+        if not doc_output:
+            source_content = f"# {issue.get('title')}\n\n{issue.get('description') or ''}"
+            source_title = f"{identifier} - {issue.get('title')}"
+            source_desc = "Issue description（找不到 Document Agent 產出，使用 issue 描述作為來源）"
+            logger.warning(f"[{identifier}] No doc output found, using issue description as source")
 
-        # Save presentation to project path
-        output_path = project_path / result["filename"]
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(result["content"], encoding="utf-8")
-        logger.info(f"[{identifier}] Saved to {output_path}")
+        # Output path
+        output_filename = f"{identifier.lower()}-slides.pptx"
+        output_path = project_path / output_filename
+
+        # Generate via NotebookLM
+        notebook_title = f"{identifier} - {issue.get('title', '')}"
+        logger.info(f"[{identifier}] Starting NotebookLM generation...")
+        pptx_path = generate_notebooklm(
+            notebook_title=notebook_title,
+            source_title=source_title,
+            source_content=source_content,
+            output_path=output_path,
+            config=config,
+        )
 
         (run_dir / "ppt_result.json").write_text(
             json.dumps({
                 "agent": "presentation_agent",
                 "status": "completed",
-                "filename": result["filename"],
-                "saved_path": str(output_path),
-                "slide_count": result["slide_count"],
-                "summary": result["summary"],
+                "source": source_desc,
+                "pptx_path": pptx_path,
             }, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
         # Determine next label from workflow plan
+        fresh_issue = client.get_issue(issue_id)
         comments = (fresh_issue.get("comments") or {}).get("nodes", [])
         plan = read_workflow_plan(comments)
         next_label = get_next_label_from_plan(plan, config.flow_label_ppt, config.presentation_next_label)
 
-        client.add_comment(issue_id, comment_success(result, str(output_path), next_label))
+        client.add_comment(issue_id, comment_success(
+            identifier, pptx_path, source_desc, next_label,
+            keep_notebook=not config.notebooklm_delete_notebook,
+        ))
         client.replace_flow_label(issue_id, next_label, config.linear_team_id)
         logger.info(f"[{identifier}] SUCCESS → {next_label}")
 
@@ -286,12 +353,13 @@ def main() -> None:
     load_dotenv()
 
     parser = argparse.ArgumentParser(
-        description="Hermes Nexus Presentation Agent — generates Marp presentations from agent-ppt issues"
+        description="Hermes Nexus Presentation Agent — generates PPTX via NotebookLM from agent-ppt issues"
     )
     parser.add_argument("--issue-id", help="Process specific Linear issue ID (UUID)")
     parser.add_argument("--identifier", help="Process by identifier, e.g. HER-5")
     parser.add_argument("--daemon", action="store_true", help="Poll continuously")
-    parser.add_argument("--interval", type=int, default=30, help="Poll interval in seconds (default: 30)")
+    parser.add_argument("--interval", type=int, default=60,
+                        help="Poll interval in seconds (default: 60, NotebookLM takes ~5-10 min per task)")
     args = parser.parse_args()
 
     config = get_settings()
@@ -301,8 +369,6 @@ def main() -> None:
         errors.append("LINEAR_API_KEY is not set")
     if not config.linear_team_id:
         errors.append("LINEAR_TEAM_ID is not set")
-    if not config.anthropic_api_key:
-        errors.append("ANTHROPIC_API_KEY is not set")
     if not config.project_path:
         errors.append("PROJECT_PATH is not set")
     if errors:
@@ -315,8 +381,9 @@ def main() -> None:
 
     logger.info(
         f"Config: team_id={config.linear_team_id}, "
-        f"model={config.presentation_model}, "
         f"watch_label={config.flow_label_ppt}, "
+        f"notebooklm_format={config.notebooklm_format}, "
+        f"notebooklm_timeout={config.notebooklm_timeout}s, "
         f"project_path={config.project_path}"
     )
 
