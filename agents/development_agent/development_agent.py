@@ -99,6 +99,18 @@ def load_memory_files(memory_dir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# PROJECT_PATH override
+# ---------------------------------------------------------------------------
+
+def extract_project_path_override(description: str) -> str | None:
+    """Parse `PROJECT_PATH: /some/path` from issue description (any line, case-insensitive)."""
+    if not description:
+        return None
+    match = re.search(r"^PROJECT_PATH:\s*(.+)$", description, re.MULTILINE | re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
+# ---------------------------------------------------------------------------
 # Requirement completeness check
 # ---------------------------------------------------------------------------
 
@@ -147,7 +159,7 @@ def check_requirement_completeness(issue: dict) -> dict:
 # Prompt builder
 # ---------------------------------------------------------------------------
 
-def build_dev_prompt(issue: dict, memory: dict, config) -> str:
+def build_dev_prompt(issue: dict, memory: dict, config, work_dir: Path | None = None) -> str:
     template_path = Path(__file__).parent / "development_prompt.md"
     base_prompt = template_path.read_text(encoding="utf-8") if template_path.exists() else ""
 
@@ -185,7 +197,7 @@ def build_dev_prompt(issue: dict, memory: dict, config) -> str:
         "",
         "---",
         "",
-        f"**PROJECT_PATH**: {config.project_path}",
+        f"**PROJECT_PATH**: {work_dir or config.project_path}",
         "",
         "## 執行限制（必須遵守）",
         "- 不要自動 git commit",
@@ -436,8 +448,17 @@ def process_issue(issue: dict, client: LinearClient, config, memory: dict) -> No
 
     set_in_progress(client, issue_id, identifier, config)
 
-    # Initialize here so except/finally can reference them even if try fails early
-    project_path = Path(config.project_path)
+    # Resolve PROJECT_PATH: config default, overridable per-issue via description
+    _path_override = extract_project_path_override(issue.get("description") or "")
+    if _path_override:
+        project_path = Path(_path_override)
+        if not project_path.exists():
+            logger.error(f"[{identifier}] PROJECT_PATH override '{_path_override}' does not exist")
+            lock_path.unlink(missing_ok=True)
+            return
+        logger.info(f"[{identifier}] PROJECT_PATH override from issue: {project_path}")
+    else:
+        project_path = Path(config.project_path)
     work_dir = project_path
     branch_name: str | None = None
     worktree_path: Path | None = None
@@ -485,7 +506,7 @@ def process_issue(issue: dict, client: LinearClient, config, memory: dict) -> No
             return
 
         # --- Build prompt ---
-        dev_prompt = build_dev_prompt(issue, memory, config)
+        dev_prompt = build_dev_prompt(issue, memory, config, work_dir=project_path)
         (run_dir / "dev_prompt.md").write_text(dev_prompt, encoding="utf-8")
         logger.info(f"[{identifier}] Saved dev_prompt.md ({len(dev_prompt)} chars)")
 
