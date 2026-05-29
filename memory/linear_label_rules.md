@@ -13,11 +13,13 @@
 |---|---|---|
 | `agent-ready` | Hermes Master | 人工確認，等待初次派工 |
 | `agent-dev` | Development Agent | 開發任務進行中 |
+| `agent-doc` | Document Agent | 文件產生進行中 |
+| `agent-ppt` | Presentation Agent | 簡報產生進行中 |
 | `agent-test` | Test Agent | 測試任務進行中 |
 | `agent-review` | Reviewer Agent | 審核進行中 |
 | `agent-escalate` | Hermes Master | 非預期情況，需重新判斷 |
 | `human-clarify` | 人工 | 需求不足，請補充描述後改回 `agent-ready` |
-| `human-confirm` | 人工 | Reviewer 通過，請執行 commit + merge |
+| `human-confirm` | 人工 | Agent 流程完成，請執行確認 / commit + merge |
 | `human-failed` | 人工 | Agent 無法處理，需人工介入 |
 
 ## 標準流程

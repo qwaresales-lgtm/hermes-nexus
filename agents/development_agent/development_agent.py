@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agents.agent_utils import acquire_lock, fetch_pending_issues, get_next_label_from_plan, read_workflow_plan, set_in_progress, set_todo
+from agents.agent_utils import acquire_lock, extract_project_path_override, fetch_pending_issues, get_next_label_from_plan, read_workflow_plan, set_in_progress, set_todo
 from core.config import get_settings
 from linear.client import LinearClient
 
@@ -96,18 +96,6 @@ def load_memory_files(memory_dir: Path) -> dict:
             memory[name] = ""
             logger.warning(f"Memory file not found (skipping): {path}")
     return memory
-
-
-# ---------------------------------------------------------------------------
-# PROJECT_PATH override
-# ---------------------------------------------------------------------------
-
-def extract_project_path_override(description: str) -> str | None:
-    """Parse `PROJECT_PATH: /some/path` from issue description (any line, case-insensitive)."""
-    if not description:
-        return None
-    match = re.search(r"^PROJECT_PATH:\s*(.+)$", description, re.MULTILINE | re.IGNORECASE)
-    return match.group(1).strip() if match else None
 
 
 # ---------------------------------------------------------------------------

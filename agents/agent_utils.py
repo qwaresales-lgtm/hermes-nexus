@@ -113,6 +113,14 @@ _PLAN_PATTERN = re.compile(
 )
 
 
+def extract_project_path_override(description: str) -> str | None:
+    """Parse `PROJECT_PATH: /some/path` from issue description (any line)."""
+    if not description:
+        return None
+    match = re.search(r"^PROJECT_PATH:\s*(.+)$", description, re.MULTILINE | re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
 def read_workflow_plan(comments: list[dict]) -> dict | None:
     """Find and parse the Hermes Master workflow plan embedded in issue comments.
 

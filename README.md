@@ -28,6 +28,8 @@ AI 多代理人任務調動系統，以 Linear label 驅動工作流程。
 |---|---|---|---|
 | [Hermes Master](#hermes-master) | `agent-ready` `agent-escalate` | 產生執行計劃並派工；處理異常重判 | [派工](agents/hermes_master/dispatch_prompt.md) · [升級處理](agents/hermes_master/escalate_prompt.md) |
 | [Development Agent](#development-agent) | `agent-dev` | 執行開發，支援 Claude Code CLI；依計劃決定下一步 | [Prompt](agents/development_agent/development_prompt.md) |
+| [Document Agent](#document-agent) | `agent-doc` | 使用 Claude API 產生 Markdown 文件 | [Prompt](agents/document_agent/system_prompt.md) |
+| [Presentation Agent](#presentation-agent) | `agent-ppt` | 使用 Claude API 產生 Marp 格式簡報 | [Prompt](agents/presentation_agent/system_prompt.md) |
 | [Reviewer Agent](#reviewer-agent) | `agent-review` | 審核開發產出；approve 時附 merge 步驟；依計劃決定下一步 | [Prompt](agents/reviewer_agent/system_prompt.md) |
 
 ---
@@ -100,6 +102,44 @@ python agents/development_agent/development_agent.py --identifier HER-5
 
 ---
 
+## Document Agent
+
+監聽 `agent-doc` label，使用 Claude Sonnet API 產生 Markdown 文件。
+
+- 根據 issue 描述判斷文件類型和結構
+- 直接寫入 `PROJECT_PATH`（支援子目錄，例如 `docs/guide.md`）
+- 支援 per-issue `PROJECT_PATH` override
+- 完成後讀取 Hermes Master 計劃決定下一步
+
+→ [查看 Prompt](agents/document_agent/system_prompt.md)
+
+```bash
+python agents/document_agent/document_agent.py
+python agents/document_agent/document_agent.py --daemon --interval 30
+python agents/document_agent/document_agent.py --identifier HER-5
+```
+
+---
+
+## Presentation Agent
+
+監聽 `agent-ppt` label，使用 Claude Sonnet API 產生 [Marp](https://marp.app/) 格式 Markdown 簡報。
+
+- 產出包含 Marp frontmatter 的 `.md` 檔案
+- 留言附上轉換為 PDF / PPTX 的指令
+- 支援 per-issue `PROJECT_PATH` override
+- 完成後讀取 Hermes Master 計劃決定下一步
+
+→ [查看 Prompt](agents/presentation_agent/system_prompt.md)
+
+```bash
+python agents/presentation_agent/presentation_agent.py
+python agents/presentation_agent/presentation_agent.py --daemon --interval 30
+python agents/presentation_agent/presentation_agent.py --identifier HER-5
+```
+
+---
+
 ## Reviewer Agent
 
 監聽 `agent-review` label，使用 Claude Sonnet API 審核 Development Agent 的產出。
@@ -146,10 +186,12 @@ python agents/reviewer_agent/reviewer_agent.py --identifier HER-5
 |---|---|---|
 | `agent-ready` | Hermes Master | — |
 | `agent-dev` | Development Agent | — |
+| `agent-doc` | Document Agent | — |
+| `agent-ppt` | Presentation Agent | — |
 | `agent-review` | Reviewer Agent | — |
 | `agent-escalate` | Hermes Master | — |
 | `human-clarify` | 人工 | 補充需求描述，改回 `agent-ready` |
-| `human-confirm` | 人工 | 執行 Reviewer 留言的 commit + merge 步驟 |
+| `human-confirm` | 人工 | 執行 Reviewer 留言的 commit + merge 步驟；或確認文件/簡報內容 |
 | `human-failed` | 人工 | 手動處理，Agent 無法執行 |
 
 **Status 說明：**
@@ -193,6 +235,8 @@ uvicorn main:app --reload
 ```bash
 python agents/hermes_master/hermes_master.py --daemon
 python agents/development_agent/development_agent.py --daemon
+python agents/document_agent/document_agent.py --daemon
+python agents/presentation_agent/presentation_agent.py --daemon
 python agents/reviewer_agent/reviewer_agent.py --daemon
 ```
 
@@ -233,6 +277,12 @@ hermes-nexus-api/
 │   ├── development_agent/
 │   │   ├── development_agent.py
 │   │   └── development_prompt.md       # Dev Agent prompt
+│   ├── document_agent/
+│   │   ├── document_agent.py
+│   │   └── system_prompt.md            # Document Agent prompt
+│   ├── presentation_agent/
+│   │   ├── presentation_agent.py
+│   │   └── system_prompt.md            # Presentation Agent prompt
 │   ├── reviewer_agent/
 │   │   ├── reviewer_agent.py
 │   │   └── system_prompt.md            # Reviewer prompt

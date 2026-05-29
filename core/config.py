@@ -36,6 +36,16 @@ class Settings(BaseSettings):
     # Hermes Master
     hermes_master_model: str = "claude-sonnet-4-6"
 
+    # Document Agent
+    flow_label_doc: str = "agent-doc"
+    document_model: str = "claude-sonnet-4-6"
+    document_next_label: str = "human-confirm"
+
+    # Presentation Agent
+    flow_label_ppt: str = "agent-ppt"
+    presentation_model: str = "claude-sonnet-4-6"
+    presentation_next_label: str = "human-confirm"
+
     # Reviewer Agent
     reviewer_model: str = "claude-sonnet-4-6"
     reviewer_approved_label: str = "human-confirm"
