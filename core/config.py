@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     git_base_branch: str = "main"
 
     # Hermes Master
-    hermes_master_model: str = "claude-sonnet-4-6"
+    hermes_master_model: str = "claude-opus-4-8"
 
     # Document Agent
     flow_label_doc: str = "agent-doc"

@@ -42,38 +42,51 @@ def _load_prompt(filename: str) -> str:
 # ---------------------------------------------------------------------------
 
 DISPATCH_TOOL = {
-    "name": "dispatch_issue",
-    "description": "Plan the full execution workflow for this Linear issue",
+    "name": "handle_issue",
+    "description": "Decide how to handle this Linear issue: respond directly, dispatch to agents, or ask for clarification",
     "input_schema": {
         "type": "object",
         "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["respond", "dispatch", "clarify"],
+                "description": (
+                    "respond: 問題或說明請求，由 Hermes Master 直接回覆，不派工；"
+                    "dispatch: 明確的工作任務，規劃執行步驟並派工；"
+                    "clarify: 無法判斷是問題還是任務，需要補充資訊"
+                ),
+            },
+            "direct_response": {
+                "type": "string",
+                "description": "action=respond 時的回覆內容（完整的 Markdown 回覆）",
+            },
+            "clarification_question": {
+                "type": "string",
+                "description": "action=clarify 時要問的問題",
+            },
             "workflow_steps": {
                 "type": "array",
-                "description": (
-                    "完整執行計劃，按順序列出每個步驟。"
-                    "第一步必須是 Agent label，最後一步通常是 human-confirm。"
-                ),
-                "minItems": 1,
+                "description": "action=dispatch 時的完整執行計劃，按順序列出每個步驟",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "order": {"type": "integer", "description": "步驟序號，從 1 開始"},
+                        "order": {"type": "integer"},
                         "label": {
                             "type": "string",
                             "enum": [
-                                "agent-dev", "agent-test", "agent-review",
+                                "agent-dev", "agent-doc", "agent-ppt",
+                                "agent-test", "agent-review",
                                 "human-confirm", "human-failed",
                             ],
                         },
-                        "description": {"type": "string", "description": "這個步驟的任務說明"},
+                        "description": {"type": "string"},
                     },
                     "required": ["order", "label", "description"],
                 },
             },
-            "summary": {"type": "string", "description": "任務分析摘要（1-2 句）"},
-            "reasoning": {"type": "string", "description": "計劃設計理由"},
+            "summary": {"type": "string", "description": "決策摘要（1-2 句）"},
         },
-        "required": ["workflow_steps", "summary", "reasoning"],
+        "required": ["action", "summary"],
     },
 }
 
@@ -181,6 +194,23 @@ def _footer() -> str:
     return f"\n\n---\n_由 **Hermes Master** 寫入 · {_ts()}_"
 
 
+def comment_responded(decision: dict) -> str:
+    return (
+        f"# Hermes Master：回覆\n\n"
+        f"{decision['direct_response']}"
+        f"{_footer()}"
+    )
+
+
+def comment_clarified(decision: dict) -> str:
+    return (
+        f"# Hermes Master：需要補充資訊\n\n"
+        f"{decision['clarification_question']}\n\n"
+        f"補充後請將 label 改回 `agent-ready`，Hermes Master 會重新判斷。"
+        f"{_footer()}"
+    )
+
+
 def comment_dispatched(decision: dict) -> str:
     steps = decision.get("workflow_steps", [])
     table_rows = "\n".join(
@@ -266,26 +296,42 @@ def process_issue(issue: dict, client: LinearClient, config, mode: str) -> None:
         decision = call_claude(system_prompt, user_prompt, tool, config)
 
         if mode == "dispatch":
-            steps = decision.get("workflow_steps", [])
-            next_label = steps[0]["label"] if steps else config.flow_label_dev
-            logger.info(f"[{identifier}] Plan: {[s['label'] for s in steps]} — first: {next_label}")
-        else:
+            action = decision.get("action", "dispatch")
+            logger.info(f"[{identifier}] Action: {action} — {decision.get('summary', '')}")
+
+            if action == "respond":
+                # Answer the question directly, remove flow label (set to human-confirm so human sees it)
+                client.add_comment(issue_id, comment_responded(decision))
+                next_label = config.flow_label_human_confirm
+                client.replace_flow_label(issue_id, next_label, config.linear_team_id)
+                logger.info(f"[{identifier}] Responded directly → {next_label}")
+
+            elif action == "clarify":
+                client.add_comment(issue_id, comment_clarified(decision))
+                next_label = config.flow_label_human_clarify
+                client.replace_flow_label(issue_id, next_label, config.linear_team_id)
+                logger.info(f"[{identifier}] Clarification requested → {next_label}")
+
+            else:  # dispatch
+                steps = decision.get("workflow_steps", [])
+                next_label = steps[0]["label"] if steps else config.flow_label_dev
+                logger.info(f"[{identifier}] Plan: {[s['label'] for s in steps]} — first: {next_label}")
+                client.add_comment(issue_id, comment_dispatched(decision))
+                client.replace_flow_label(issue_id, next_label, config.linear_team_id)
+                logger.info(f"[{identifier}] Dispatched → {next_label}")
+
+        else:  # escalate
             next_label = decision["next_label"]
             logger.info(f"[{identifier}] Re-route → {next_label}")
+            client.add_comment(issue_id, comment_escalation_handled(decision))
+            client.replace_flow_label(issue_id, next_label, config.linear_team_id)
+            logger.info(f"[{identifier}] Label → {next_label}")
 
         (run_dir / "master_result.json").write_text(
-            json.dumps({"agent": "hermes_master", "mode": mode, "next_label": next_label, **decision},
+            json.dumps({"agent": "hermes_master", "mode": mode, **decision},
                        ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-
-        if mode == "dispatch":
-            client.add_comment(issue_id, comment_dispatched(decision))
-        else:
-            client.add_comment(issue_id, comment_escalation_handled(decision))
-
-        client.replace_flow_label(issue_id, next_label, config.linear_team_id)
-        logger.info(f"[{identifier}] Label → {next_label}")
 
     except Exception as e:
         logger.error(f"[{identifier}] Unexpected error: {e}", exc_info=True)
