@@ -20,7 +20,7 @@ load_dotenv()
 
 import anthropic
 
-from agents.agent_utils import acquire_lock, fetch_pending_issues, set_in_progress, set_todo
+from agents.agent_utils import acquire_lock, fetch_pending_issues, set_in_progress, set_todo, read_workflow_plan, get_next_label_from_plan
 from core.config import get_settings
 from linear.client import LinearClient
 
@@ -43,24 +43,37 @@ def _load_prompt(filename: str) -> str:
 
 DISPATCH_TOOL = {
     "name": "dispatch_issue",
-    "description": "Decide which agent should handle this new Linear issue",
+    "description": "Plan the full execution workflow for this Linear issue",
     "input_schema": {
         "type": "object",
         "properties": {
-            "next_label": {
-                "type": "string",
-                "enum": ["agent-dev", "agent-test", "agent-review", "human-failed"],
+            "workflow_steps": {
+                "type": "array",
                 "description": (
-                    "agent-dev: 開發/實作/修改/文件任務；"
-                    "agent-test: 驗收已完成功能的測試任務；"
-                    "agent-review: 審查已提交 PR 的任務；"
-                    "human-failed: 需要 production 權限、機密存取、無法由 Agent 處理"
+                    "完整執行計劃，按順序列出每個步驟。"
+                    "第一步必須是 Agent label，最後一步通常是 human-confirm。"
                 ),
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "order": {"type": "integer", "description": "步驟序號，從 1 開始"},
+                        "label": {
+                            "type": "string",
+                            "enum": [
+                                "agent-dev", "agent-test", "agent-review",
+                                "human-confirm", "human-failed",
+                            ],
+                        },
+                        "description": {"type": "string", "description": "這個步驟的任務說明"},
+                    },
+                    "required": ["order", "label", "description"],
+                },
             },
-            "summary": {"type": "string", "description": "派工決策摘要（1-2 句）"},
-            "reasoning": {"type": "string", "description": "決策理由"},
+            "summary": {"type": "string", "description": "任務分析摘要（1-2 句）"},
+            "reasoning": {"type": "string", "description": "計劃設計理由"},
         },
-        "required": ["next_label", "summary", "reasoning"],
+        "required": ["workflow_steps", "summary", "reasoning"],
     },
 }
 
@@ -169,11 +182,26 @@ def _footer() -> str:
 
 
 def comment_dispatched(decision: dict) -> str:
+    steps = decision.get("workflow_steps", [])
+    table_rows = "\n".join(
+        f"| {s['order']} | `{s['label']}` | {s['description']} |"
+        for s in steps
+    )
+    steps_table = f"| 步驟 | Label | 說明 |\n|---|---|---|\n{table_rows}"
+
+    plan_json = json.dumps(
+        {"version": 1, "steps": [{"order": s["order"], "label": s["label"], "description": s["description"]} for s in steps]},
+        ensure_ascii=False,
+    )
+    first_label = steps[0]["label"] if steps else "agent-dev"
+
     return (
         f"# Hermes Master：任務派工\n\n"
-        f"## 派工決策\n\n{decision['summary']}\n\n"
+        f"## 任務分析\n\n{decision['summary']}\n\n"
+        f"## 執行計劃\n\n{steps_table}\n\n"
         f"## 理由\n\n{decision['reasoning']}\n\n"
-        f"## 下一步\n任務已分配至 `{decision['next_label']}`。"
+        f"**HERMES_PLAN**\n```json\n{plan_json}\n```\n\n"
+        f"## 下一步\n任務已分配至 `{first_label}`，開始執行第一步。"
         f"{_footer()}"
     )
 
@@ -236,10 +264,17 @@ def process_issue(issue: dict, client: LinearClient, config, mode: str) -> None:
 
         logger.info(f"[{identifier}] Calling {config.hermes_master_model} ({mode})...")
         decision = call_claude(system_prompt, user_prompt, tool, config)
-        logger.info(f"[{identifier}] Decision: {decision['next_label']} — {decision['summary']}")
+
+        if mode == "dispatch":
+            steps = decision.get("workflow_steps", [])
+            next_label = steps[0]["label"] if steps else config.flow_label_dev
+            logger.info(f"[{identifier}] Plan: {[s['label'] for s in steps]} — first: {next_label}")
+        else:
+            next_label = decision["next_label"]
+            logger.info(f"[{identifier}] Re-route → {next_label}")
 
         (run_dir / "master_result.json").write_text(
-            json.dumps({"agent": "hermes_master", "mode": mode, **decision},
+            json.dumps({"agent": "hermes_master", "mode": mode, "next_label": next_label, **decision},
                        ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
@@ -249,8 +284,8 @@ def process_issue(issue: dict, client: LinearClient, config, mode: str) -> None:
         else:
             client.add_comment(issue_id, comment_escalation_handled(decision))
 
-        client.replace_flow_label(issue_id, decision["next_label"], config.linear_team_id)
-        logger.info(f"[{identifier}] Label → {decision['next_label']}")
+        client.replace_flow_label(issue_id, next_label, config.linear_team_id)
+        logger.info(f"[{identifier}] Label → {next_label}")
 
     except Exception as e:
         logger.error(f"[{identifier}] Unexpected error: {e}", exc_info=True)

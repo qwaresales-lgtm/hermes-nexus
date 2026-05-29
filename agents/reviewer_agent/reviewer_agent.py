@@ -20,7 +20,7 @@ load_dotenv()
 
 import anthropic
 
-from agents.agent_utils import acquire_lock, fetch_pending_issues, set_in_progress, set_todo
+from agents.agent_utils import acquire_lock, fetch_pending_issues, get_next_label_from_plan, read_workflow_plan, set_in_progress, set_todo
 from core.config import get_settings
 from linear.client import LinearClient
 
@@ -388,8 +388,12 @@ def process_issue(issue: dict, client: LinearClient, config, memory: dict) -> No
 
         decision = review["decision"]
 
+        # Determine next label: follow Hermes Master's workflow plan if available
+        comments = (fresh_issue.get("comments") or {}).get("nodes", [])
+        plan = read_workflow_plan(comments)
+
         if decision == "approve":
-            next_label = config.reviewer_approved_label
+            next_label = get_next_label_from_plan(plan, config.flow_label_review, config.reviewer_approved_label)
             _save_result_json(run_dir, "approved", decision, review["summary"], next_label, review, requires_human=True)
             client.add_comment(issue_id, comment_approved(
                 review, next_label,

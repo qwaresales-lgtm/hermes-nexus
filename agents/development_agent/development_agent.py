@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agents.agent_utils import acquire_lock, fetch_pending_issues, set_in_progress, set_todo
+from agents.agent_utils import acquire_lock, fetch_pending_issues, get_next_label_from_plan, read_workflow_plan, set_in_progress, set_todo
 from core.config import get_settings
 from linear.client import LinearClient
 
@@ -575,7 +575,11 @@ def process_issue(issue: dict, client: LinearClient, config, memory: dict) -> No
         (run_dir / "dev_result.md").write_text(dev_result_md, encoding="utf-8")
         logger.info(f"[{identifier}] Saved dev_result.md")
 
-        next_label = config.development_next_label
+        # Determine next label: follow Hermes Master's workflow plan if available
+        fresh_comments = (client.get_issue(issue_id).get("comments") or {}).get("nodes", [])
+        plan = read_workflow_plan(fresh_comments)
+        next_label = get_next_label_from_plan(plan, config.flow_label_dev, config.development_next_label)
+
         _save_result_json(run_dir, "completed", config.dev_agent_backend,
                           "next_agent",
                           "Development Agent 已完成開發，建議交給下一位 Agent 審核。",

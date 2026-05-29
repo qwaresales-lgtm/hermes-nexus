@@ -6,11 +6,17 @@ All agents must follow this protocol:
   2. Acquire a PID-aware lock before processing
   3. Set status to In Progress immediately after acquiring the lock
   4. Reset status to Todo in a finally block, then release the lock
+
+Workflow plan (set by Hermes Master, read by all agents):
+  - Hermes Master embeds a JSON plan in its dispatch comment
+  - Each agent calls get_next_label_from_plan() to determine next step
+  - Falls back to config default if no plan found
 """
 
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -95,3 +101,50 @@ def set_todo(client: LinearClient, issue_id: str, identifier: str, config) -> No
         logger.info(f"[{identifier}] State → '{config.linear_state_todo}'")
     except Exception as e:
         logger.warning(f"[{identifier}] Could not reset state to Todo: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Workflow plan (set by Hermes Master, consumed by all agents)
+# ---------------------------------------------------------------------------
+
+_PLAN_PATTERN = re.compile(
+    r"\*\*HERMES_PLAN\*\*\s*```(?:json)?\s*(\{.*?\})\s*```",
+    re.DOTALL,
+)
+
+
+def read_workflow_plan(comments: list[dict]) -> dict | None:
+    """Find and parse the Hermes Master workflow plan embedded in issue comments.
+
+    Returns the plan dict, or None if no plan is found.
+    """
+    for comment in comments:
+        body = comment.get("body", "")
+        match = _PLAN_PATTERN.search(body)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+    return None
+
+
+def get_next_label_from_plan(
+    plan: dict | None, current_label: str, fallback: str
+) -> str:
+    """Return the next label in the workflow plan after current_label.
+
+    Falls back to `fallback` when:
+    - No plan exists
+    - current_label is not in the plan
+    - current_label is the last step
+    """
+    if not plan:
+        return fallback
+    steps = plan.get("steps", [])
+    for i, step in enumerate(steps):
+        if step.get("label") == current_label and i + 1 < len(steps):
+            next_label = steps[i + 1]["label"]
+            logger.info(f"Workflow plan: {current_label} → {next_label}")
+            return next_label
+    return fallback
