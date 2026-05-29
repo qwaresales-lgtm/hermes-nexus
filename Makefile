@@ -1,21 +1,41 @@
 PYTHON := venv/bin/python
 
-.PHONY: help install api master dev doc ppt reviewer
+.PHONY: help install api master dev doc ppt reviewer start stop status restart
 
 help:
 	@echo "Hermes Nexus — 常用指令"
 	@echo ""
-	@echo "  make install     安裝依賴到 venv"
-	@echo "  make api         啟動 FastAPI"
-	@echo "  make master      啟動 Hermes Master (daemon)"
-	@echo "  make dev         啟動 Development Agent (daemon)"
-	@echo "  make doc         啟動 Document Agent (daemon)"
-	@echo "  make ppt         啟動 Presentation Agent (daemon)"
-	@echo "  make reviewer    啟動 Reviewer Agent (daemon)"
+	@echo "排程管理："
+	@echo "  make start       啟動所有 Agent（背景執行）"
+	@echo "  make stop        停止所有 Agent"
+	@echo "  make status      查看各 Agent 狀態"
+	@echo "  make restart     重啟所有 Agent"
+	@echo ""
+	@echo "單獨啟動（daemon）："
+	@echo "  make master / dev / doc / ppt / reviewer"
 	@echo ""
 	@echo "單次執行（指定 issue）："
 	@echo "  make master ID=HER-5"
 	@echo "  make dev    ID=HER-5"
+	@echo ""
+	@echo "其他："
+	@echo "  make install              安裝依賴到 venv"
+	@echo "  make api                  啟動 FastAPI"
+	@echo "  make install-notebooklm   安裝 NotebookLM 套件"
+	@echo "  make notebooklm-login     NotebookLM Google 登入"
+	@echo "  make notebooklm-check     確認 NotebookLM 登入狀態"
+
+start:
+	./scheduler.sh start
+
+stop:
+	./scheduler.sh stop
+
+status:
+	./scheduler.sh status
+
+restart:
+	./scheduler.sh restart
 
 install:
 	python3 -m venv venv
