@@ -27,7 +27,10 @@ install-notebooklm:
 	@echo "Done. Run: make notebooklm-login"
 
 notebooklm-login:
-	venv/bin/notebooklm login --browser-cookies chrome
+	venv/bin/notebooklm login
+
+notebooklm-check:
+	venv/bin/notebooklm auth check --test --json
 
 api:
 	$(PYTHON) -m uvicorn main:app --reload
