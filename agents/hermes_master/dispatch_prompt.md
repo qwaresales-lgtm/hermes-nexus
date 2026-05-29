@@ -61,9 +61,9 @@
 4. 文件+簡報：`agent-doc → agent-ppt → human-confirm`
 5. 簡單修改：`agent-dev → human-confirm`
 
-## human-retry 特別處理
+## agent-retry 特別處理
 
-如果 label 是 `human-retry`：
+如果 label 是 `agent-retry`：
 - 開發者已修復問題，人工確認可以重試
 - **不要改變執行工具或策略**
 - 只判斷從哪個步驟重新開始

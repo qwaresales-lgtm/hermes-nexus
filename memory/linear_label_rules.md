@@ -18,9 +18,10 @@
 | `agent-test` | Test Agent | 測試任務進行中 |
 | `agent-review` | Reviewer Agent | 審核進行中 |
 | `agent-escalate` | Hermes Master | 非預期情況，需重新判斷 |
+| `agent-retry` | Hermes Master | 人工判斷後確認重試，Agent 重新規劃執行 |
 | `human-clarify` | 人工 | 需求不足，請補充描述後改回 `agent-ready` |
 | `human-confirm` | 人工 | Agent 流程完成，請執行確認 / commit + merge |
-| `human-failed` | 人工 | Agent 無法處理，需人工介入 |
+| `human-failed` | 人工 | Agent 無法處理，需人工介入後改為 `agent-retry` |
 
 ## 標準流程
 
@@ -47,7 +48,8 @@ human-clarify（人工補充需求，改回 agent-ready）
   ↓
 agent-escalate（Hermes Master 重新判斷）
   ↓ 確認無法處理
-human-failed（人工介入）
+human-failed（人工介入後改成 agent-retry）
+  ↓ Hermes Master 重新規劃（不受升級次數限制）
 ```
 
 ## 使用規則

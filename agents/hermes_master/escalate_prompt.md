@@ -22,5 +22,5 @@
 
 ## 重試出口
 
-issue 進入 `human-failed` 後，人工確認並修正問題，可以將 label 改為 `human-retry + Todo`。
-Hermes Master 收到 `human-retry` 會重新規劃，不受「兩次升級」的限制。
+issue 進入 `human-failed` 後，人工確認並修正問題，可以將 label 改為 `agent-retry + Todo`。
+Hermes Master 收到 `agent-retry` 會重新規劃，不受「兩次升級」的限制。

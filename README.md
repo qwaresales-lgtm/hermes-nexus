@@ -192,7 +192,8 @@ python agents/reviewer_agent/reviewer_agent.py --identifier HER-5
 | `agent-escalate` | Hermes Master | — |
 | `human-clarify` | 人工 | 補充需求描述，改回 `agent-ready` |
 | `human-confirm` | 人工 | 執行 Reviewer 留言的 commit + merge 步驟；或確認文件/簡報內容 |
-| `human-failed` | 人工 | 手動處理，Agent 無法執行 |
+| `agent-retry` | Hermes Master | 人工確認後重試，Hermes Master 重新規劃 |
+| `human-failed` | 人工 | 手動處理，確認後改為 `agent-retry` |
 
 **Status 說明：**
 - `Todo` = 等待 Agent 接手
