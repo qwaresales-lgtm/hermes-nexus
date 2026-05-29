@@ -371,13 +371,13 @@ def comment_incomplete(req_check: dict) -> str:
         f"{i + 1}. {q}" for i, q in enumerate(req_check["suggested_questions"])
     )
     return (
-        f"# Development Agent：需求資訊不足，需人工確認\n\n"
+        f"# Development Agent：需求資訊不足，需人工補充\n\n"
         f"此任務目前無法安全進行開發，原因如下：\n\n"
         f"## 缺少資訊\n\n{missing}\n\n"
         f"## 請補充\n\n{questions}\n\n"
         f"## 系統處理\n\n"
         f"- Development Agent 未進行開發\n"
-        f"- 任務已改為 `human-confirm`"
+        f"- 任務已改為 `human-clarify`，請補充需求後將 label 改回 `agent-ready`"
         f"{_footer()}"
     )
 
@@ -471,16 +471,16 @@ def process_issue(issue: dict, client: LinearClient, config, memory: dict) -> No
             )
             logger.info(f"[{identifier}] Saved missing_requirements.md")
             _save_result_json(run_dir, "blocked", config.dev_agent_backend,
-                              "needs_human_confirmation",
+                              "needs_human_clarification",
                               "需求資訊不足，未進行開發，已要求人工補充。",
-                              "human-confirm",
+                              config.flow_label_human_clarify,
                               {"missing_requirements": "missing_requirements.md"},
                               requires_human=True)
             logger.info(f"[{identifier}] Saved dev_result.json (status=blocked)")
             logger.info(f"[{identifier}] Linear: adding comment (incomplete requirements)")
             client.add_comment(issue_id, comment_incomplete(req_check))
-            logger.info(f"[{identifier}] Linear: replacing label → human-confirm")
-            client.replace_flow_label(issue_id, config.flow_label_human_confirm, config.linear_team_id)
+            logger.info(f"[{identifier}] Linear: replacing label → {config.flow_label_human_clarify}")
+            client.replace_flow_label(issue_id, config.flow_label_human_clarify, config.linear_team_id)
             logger.info(f"[{identifier}] Blocked flow complete: label set to human-confirm")
             return
 

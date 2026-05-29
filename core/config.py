@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     flow_label_review: str = "agent-review"
     flow_label_escalate: str = "agent-escalate"
     flow_label_human_confirm: str = "human-confirm"
+    flow_label_human_clarify: str = "human-clarify"
     flow_label_human_failed: str = "human-failed"
     development_next_label: str = "agent-review"
 

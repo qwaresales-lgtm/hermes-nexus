@@ -227,13 +227,39 @@ def _footer() -> str:
     return f"\n\n---\n_由 **Reviewer Agent** 寫入 · {_ts()}_"
 
 
-def comment_approved(review: dict, next_label: str) -> str:
+def comment_approved(review: dict, next_label: str,
+                     branch_name: str | None = None,
+                     worktree_path: str | None = None,
+                     project_path: str | None = None) -> str:
     notes = "\n".join(f"- {i}" for i in review.get("issues_found", [])) or "- 無"
+
+    if branch_name and worktree_path:
+        slug = branch_name.split("/")[-1]
+        merge_section = (
+            f"\n\n## 合併步驟\n\n"
+            f"開發的變更在本機 worktree，尚未 commit，請依序執行：\n\n"
+            f"```bash\n"
+            f"# 1. 進入 worktree\n"
+            f"cd {worktree_path}\n\n"
+            f"# 2. Commit 變更\n"
+            f"git add .\n"
+            f'git commit -m "{slug}"\n\n'
+            f"# 3. 回到專案目錄並 merge\n"
+            f"cd {project_path or '<PROJECT_PATH>'}\n"
+            f"git merge {branch_name}\n\n"
+            f"# 4. 清除 worktree\n"
+            f"git worktree remove --force {worktree_path}\n"
+            f"```"
+        )
+    else:
+        merge_section = "\n\n## 合併步驟\n\n非 git 專案任務，請直接確認產出內容是否符合需求。"
+
     return (
         f"# Reviewer Agent：審核通過\n\n"
         f"## 審核摘要\n\n{review['summary']}\n\n"
-        f"## 備註\n\n{notes}\n\n"
-        f"## 下一步\n任務已轉移至 `{next_label}`，請人工確認並合併。"
+        f"## 備註\n\n{notes}"
+        f"{merge_section}\n\n"
+        f"## 下一步\n任務已轉移至 `{next_label}`，請人工確認後 merge。"
         f"{_footer()}"
     )
 
@@ -327,8 +353,18 @@ def process_issue(issue: dict, client: LinearClient, config, memory: dict) -> No
         )
 
         dev_run_dir = find_latest_dev_run(identifier)
+        branch_name = None
+        worktree_path = None
         if dev_run_dir:
             logger.info(f"[{identifier}] Found dev run: {dev_run_dir.name}")
+            try:
+                dev_result = json.loads((dev_run_dir / "dev_result.json").read_text(encoding="utf-8"))
+                branch_name = dev_result.get("branch")
+                if branch_name:
+                    worktree_path = str(Path(config.worktree_base_dir) / identifier)
+                    logger.info(f"[{identifier}] Branch: {branch_name}  worktree: {worktree_path}")
+            except Exception as e:
+                logger.warning(f"[{identifier}] Could not read branch from dev_result.json: {e}")
         else:
             logger.warning(f"[{identifier}] No completed dev run found — reviewing from issue only")
 
@@ -355,7 +391,12 @@ def process_issue(issue: dict, client: LinearClient, config, memory: dict) -> No
         if decision == "approve":
             next_label = config.reviewer_approved_label
             _save_result_json(run_dir, "approved", decision, review["summary"], next_label, review, requires_human=True)
-            client.add_comment(issue_id, comment_approved(review, next_label))
+            client.add_comment(issue_id, comment_approved(
+                review, next_label,
+                branch_name=branch_name,
+                worktree_path=worktree_path,
+                project_path=config.project_path,
+            ))
             client.replace_flow_label(issue_id, next_label, config.linear_team_id)
             logger.info(f"[{identifier}] APPROVED → {next_label}")
 

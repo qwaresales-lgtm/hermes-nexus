@@ -24,6 +24,14 @@
 
 ## Label 流程
 
-- 開發完成 → `agent-review`
-- 需求不足 → `human-confirm`
-- 執行失敗 → `agent-escalate`
+| 情境 | 下一個 Label | 人工要做什麼 |
+|---|---|---|
+| 開發完成 | `agent-review` | 等 Reviewer 審核 |
+| 需求不足 | `human-clarify` | 補充需求後改回 `agent-ready` |
+| 執行失敗 | `agent-escalate` | 等 Hermes Master 重新判斷 |
+
+## 注意
+
+`human-clarify` 和 `human-confirm` 是不同的 label：
+- `human-clarify`：需要人工補充需求說明
+- `human-confirm`：Reviewer 通過，需要人工 commit + merge
